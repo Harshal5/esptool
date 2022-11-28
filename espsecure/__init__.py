@@ -12,6 +12,7 @@ import struct
 import sys
 import zlib
 from collections import namedtuple
+import configparser
 
 from cryptography import exceptions
 from cryptography.hazmat.backends import default_backend
@@ -24,6 +25,7 @@ from cryptography.utils import int_to_bytes
 import ecdsa
 
 import esptool
+import espsecure.esp_hsm_sign as hsm
 
 SIG_BLOCK_MAGIC = 0xE7
 
@@ -333,6 +335,13 @@ def sign_secure_boot_v1(args):
     Sign a data file with a ECDSA private key, append binary signature to file contents
     """
     binary_content = args.datafile.read()
+
+    if args.hsm:
+        raise esptool.FatalError(
+            "Secure Boot V1 does not support signing using an "
+            "external Hardware Security Module (HSM)"
+        )
+
     if args.signature:
         print("Pre-calculated signatures")
         if len(args.pub_key) > 1:
@@ -376,6 +385,16 @@ def sign_secure_boot_v2(args):
     Write output file with a Secure Boot V2 header appended.
     """
     SIG_BLOCK_MAX_COUNT = 3
+    contents = args.datafile.read()
+
+    if args.hsm:
+        if args.config is None:
+            raise esptool.FatalError(
+                "Config file is required to generate signature using an external HSM."
+            )
+        config = configparser.ConfigParser()
+        config.read(args.config)
+        args.signature = generate_signature_using_hsm(config["hsm_config"], contents)
 
     if args.signature:
         print("Pre-calculated signatures")
@@ -389,7 +408,6 @@ def sign_secure_boot_v2(args):
         key_count = len(args.keyfile)
 
     signature_sector = b""
-    contents = args.datafile.read()
 
     if key_count > SIG_BLOCK_MAX_COUNT:
         print(
@@ -399,6 +417,12 @@ def sign_secure_boot_v2(args):
         )
 
     if len(contents) % SECTOR_SIZE != 0:
+        if args.signature:
+            raise esptool.FatalError(
+                "Secure Boot V2 requires the signature block to start "
+                "from a 4KB aligned sector "
+                "but the datafile supplied is not sector aligned."
+            )
         pad_by = SECTOR_SIZE - (len(contents) % SECTOR_SIZE)
         print(
             "Padding data contents by %d bytes "
@@ -486,6 +510,21 @@ def sign_secure_boot_v2(args):
         f"Signed {len(contents)} bytes of data from {args.datafile.name}. "
         f"Signature sector now has {total_sig_blocks} signature blocks."
     )
+
+
+def generate_signature_using_hsm(config, contents):
+    session = hsm.establish_session(config)
+    session.login(config["credentials"])
+    # get the private key
+    private_key = hsm.get_key(session, config)
+    # Sign payload
+    signature = hsm.sign_payload(session, contents, private_key)
+
+    session.logout()
+    session.closeSession()
+    with open("signature.bin", "wb") as f:
+        f.write(signature)
+    return [open("signature.bin", "rb")]
 
 
 def generate_signature_block_using_pre_calculated_signature(signature, pub_key, digest):
@@ -1410,6 +1449,18 @@ def main(custom_commandline=None):
         help="Append signature block(s) to already signed image. "
         "Valid only for ESP32-S2.",
         action="store_true",
+    )
+    p.add_argument(
+        "--hsm",
+        help="Use an external Hardware Security Module "
+        "to generate signature using PKCS#11 interface.",
+        action="store_true",
+    )
+    p.add_argument(
+        "--config",
+        help="Config file for the external Hardware Security Module "
+        "to be used to generate signature.",
+        default=None,
     )
     p.add_argument(
         "--pub-key",
