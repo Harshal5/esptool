@@ -343,7 +343,7 @@ def sign_secure_boot_v1(args):
         )
 
     if args.signature:
-        print("Pre-calculated signatures")
+        print("Pre-calculated signatures found")
         if len(args.pub_key) > 1:
             raise esptool.FatalError("Secure Boot V1 only supports one signing key")
         signature = args.signature[0].read()
@@ -397,7 +397,7 @@ def sign_secure_boot_v2(args):
         args.signature = generate_signature_using_hsm(config["hsm_config"], contents)
 
     if args.signature:
-        print("Pre-calculated signatures")
+        print("Pre-calculated signatures found")
         key_count = len(args.pub_key)
         if len(args.signature) != key_count:
             raise esptool.FatalError(
@@ -481,6 +481,9 @@ def sign_secure_boot_v2(args):
         signature_block = generate_signature_block_using_private_key(
             args.keyfile, digest
         )
+
+    if signature_block is None or len(signature_block) == 0:
+        raise esptool.FatalError("Signature Block generation failed")
 
     signature_sector += signature_block
 

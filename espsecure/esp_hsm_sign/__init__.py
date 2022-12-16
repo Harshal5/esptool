@@ -21,11 +21,13 @@ from PyKCS11.LowLevel import (
 
 
 def establish_session(config):
+    print("Trying to establish a session with the HSM.")
     pkcs11 = PyKCS11.PyKCS11Lib()
     pkcs11.load(config["pkcs11_lib"])
     try:
         print(pkcs11.getSlotList())
         session = pkcs11.openSession(int(config["slot"]), CKF_RW_SESSION)
+        print(f'Session creation successful with HSM slot {int(config["slot"])}.')
         return session
 
     except PyKCS11.PyKCS11Error as e:
@@ -37,6 +39,7 @@ def get_key(session, config):
         private_key = session.findObjects(
             [(CKA_CLASS, CKO_PRIVATE_KEY), (CKA_LABEL, config["label"])]
         )[0]
+        print(f'Got private key metadata with label {config["label"]}.')
         return private_key
 
     except PyKCS11.PyKCS11Error as e:
@@ -45,10 +48,12 @@ def get_key(session, config):
 
 def sign_payload(session, payload, private_key):
     try:
+        print("Signing payload using the HSM.")
         key_type = session.getAttributeValue(private_key, [CKA_KEY_TYPE])[0]
         mechanism = get_mechanism(key_type)
         signature = bytes(session.sign(private_key, payload, mechanism))
-
+        if len(signature) != 0:
+            print("Signature generation successful.")
         if key_type == CKK_ECDSA:
             r = int(binascii.hexlify(signature[:32]), 16)
             s = int(binascii.hexlify(signature[32:]), 16)
