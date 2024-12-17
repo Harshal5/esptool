@@ -1122,6 +1122,10 @@ def elf2image(args):
         image.sort_segments()
 
     before = len(image.segments)
+
+    image.compress_flash_rodata = args.compress_flash_rodata
+    image.compress_flash_instructions = args.compress_flash_instructions
+
     image.merge_adjacent_segments()
     if len(image.segments) != before:
         delta = before - len(image.segments)

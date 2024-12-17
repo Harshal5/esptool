@@ -526,6 +526,17 @@ def main(argv=None, esp=None):
         action="store_true",
         default=None,
     )
+    parser_elf2image.add_argument(
+        "--compress-flash-rodata",
+        action="store_true",
+        default=None,
+    )
+
+    parser_elf2image.add_argument(
+        "--compress-flash-instructions",
+        action="store_true",
+        default=None,
+    )
 
     add_spi_flash_subparsers(parser_elf2image, allow_keep=False, auto_detect=False)
 
