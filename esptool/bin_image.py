@@ -277,21 +277,19 @@ class BaseFirmwareImage(object):
         return next checksum value if provided
         """
         segment_data = self.maybe_patch_segment_data(f, segment.data)
-
+        print(segment.name)
         if (
             (segment.name == ".flash.text" and self.compress_flash_instructions)
-            or segment.name == ".flash.rodata"
-            and self.compress_flash_rodata
         ):
             print(
                 f"Compressing data for {segment.name} of length = ", len(segment_data)
             )
 
-            with open("/tmp/uncompressed.bin", "wb") as ff:
+            with open(f"/tmp/uncompressed_{segment.name}.bin", "wb") as ff:
                 ff.write(segment_data)
 
             subprocess.run(
-                ["rm", "/tmp/uncompressed.bin.xz"], capture_output=True, text=True
+                ["rm", f"/tmp/uncompressed_{segment.name}.bin.xz"], capture_output=True, text=True
             )
 
             command = [
@@ -299,18 +297,18 @@ class BaseFirmwareImage(object):
                 "--check=crc32",
                 "--lzma2=dict=64KiB",
                 "-k",
-                "/tmp/uncompressed.bin",
+                f"/tmp/uncompressed_{segment.name}.bin",
             ]
 
             # Execute the shell command
             result = subprocess.run(command, capture_output=True, text=True)
 
             if result.returncode == 0:
-                print("File compressed successfully: /tmp/uncompressed.bin.xz")
+                print(f"File compressed successfully: /tmp/uncompressed_{segment.name}.bin.xz")
             else:
                 print(f"Error compressing file: {result.stderr}")
 
-            with open("/tmp/uncompressed.bin.xz", "rb") as ff:
+            with open(f"/tmp/uncompressed_{segment.name}.bin.xz", "rb") as ff:
                 segment_data = ff.read()
 
             # FILTER_LZMA2 is needed for FORMAT_RAW and FORMAT_XZ
@@ -344,6 +342,42 @@ class BaseFirmwareImage(object):
             # segment_data = zlib.compress(segment_data, 9)
 
             print(f"Compressed data length for {segment.name} = ", len(segment_data))
+
+        if (segment.name == ".flash.appdesc" and self.compress_flash_rodata):
+            print(
+                f"Compressing data for {segment.name} of length = ", len(segment_data[256:])
+            )
+
+            with open(f"/tmp/uncompressed_{segment.name}.bin", "wb") as ff:
+                ff.write(segment_data[256:])
+
+            subprocess.run(
+                ["rm", f"/tmp/uncompressed_{segment.name}.bin.xz"], capture_output=True, text=True
+            )
+
+            command = [
+                "xz",
+                "--check=crc32",
+                "--lzma2=dict=64KiB",
+                "-k",
+                f"/tmp/uncompressed_{segment.name}.bin",
+            ]
+
+            # Execute the shell command
+            result = subprocess.run(command, capture_output=True, text=True)
+
+            if result.returncode == 0:
+                print(f"File compressed successfully: /tmp/uncompressed_{segment.name}.bin.xz")
+            else:
+                print(f"Error compressing file: {result.stderr}")
+
+            with open(f"/tmp/uncompressed_{segment.name}.bin.xz", "rb") as ff:
+                ro_data = ff.read()
+
+            segment_data = segment_data[0:256] + ro_data
+
+            print(f"Compressed data length for {segment.name} = ", len(segment_data))
+
 
         f.write(struct.pack("<II", segment.addr, len(segment_data)))
         f.write(segment_data)

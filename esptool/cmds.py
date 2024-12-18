@@ -1122,6 +1122,8 @@ def elf2image(args):
         image.sort_segments()
 
     before = len(image.segments)
+    print("++++++++++++++ Original Image Segments ++++++++++++++++++")
+    print([(seg.name, len(seg.data)) for seg in image.segments])
 
     image.compress_flash_rodata = args.compress_flash_rodata
     image.compress_flash_instructions = args.compress_flash_instructions
