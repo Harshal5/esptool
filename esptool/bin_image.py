@@ -7,6 +7,7 @@ import binascii
 import copy
 import hashlib
 import io
+import lzma
 import os
 import re
 import struct
@@ -277,107 +278,42 @@ class BaseFirmwareImage(object):
         return next checksum value if provided
         """
         segment_data = self.maybe_patch_segment_data(f, segment.data)
-        print(segment.name)
         if (
-            (segment.name == ".flash.text" and self.compress_flash_instructions)
+            (segment.name == ".flash.text" and self.compress_flash_instructions) or
+            (segment.name == ".flash.appdesc" and self.compress_flash_rodata)
         ):
             print(
                 f"Compressing data for {segment.name} of length = ", len(segment_data)
             )
 
-            with open(f"/tmp/uncompressed_{segment.name}.bin", "wb") as ff:
-                ff.write(segment_data)
+            data_to_be_compressed = None
 
-            subprocess.run(
-                ["rm", f"/tmp/uncompressed_{segment.name}.bin.xz"], capture_output=True, text=True
-            )
-
-            command = [
-                "xz",
-                "--check=crc32",
-                "--lzma2=dict=64KiB",
-                "-k",
-                f"/tmp/uncompressed_{segment.name}.bin",
-            ]
-
-            # Execute the shell command
-            result = subprocess.run(command, capture_output=True, text=True)
-
-            if result.returncode == 0:
-                print(f"File compressed successfully: /tmp/uncompressed_{segment.name}.bin.xz")
+            if (segment.name == ".flash.appdesc"):
+                data_to_be_compressed = segment_data[256:]
             else:
-                print(f"Error compressing file: {result.stderr}")
+                data_to_be_compressed = segment_data
 
-            with open(f"/tmp/uncompressed_{segment.name}.bin.xz", "rb") as ff:
-                segment_data = ff.read()
-
-            # FILTER_LZMA2 is needed for FORMAT_RAW and FORMAT_XZ
-            # TODO: improvements
-            # 1. check if decreasing preset, decreases the RAM usage
-            #    Also check if decreasing this preset, increase the size of compressed data
-            # xz_compressor_filter = [
-            #     {"id": lzma.FILTER_LZMA2, "preset": 6, "dict_size": 8*1024},
-            # ]
+            xz_compressor_filter = [
+                {"id": lzma.FILTER_LZMA2, "preset": 6, "dict_size": 64*1024},
+            ]
 
             # TODO: improvements:
             # 1. Maybe we could use format = lzma.FORMAT_RAW, and check if we save of space
             # 2. Do we need integrity check here? Given we append SHA256 of the data,
             #    probably we could ser this "check" parameter to check = lzma.CHECK_NONE
+            #    Maybe we could decrease the decompression
             # 3. Explore dictionary sizes
-            # xz_compressor = lzma.LZMACompressor(format=lzma.FORMAT_XZ, check=lzma.CHECK_CRC32, filters=xz_compressor_filter)
-            # segment_data_compressed = lzma.compress(segment_data, format=lzma.FORMAT_XZ)
-            # print("len(segment_data_compressed) =,", len(segment_data_compressed))
-
-            # # xz_decompressor = lzma.LZMADecompressor(format=lzma.FORMAT_XZ)
-            # segment_data_uncompressed = lzma.decompress(segment_data_compressed, format=lzma.FORMAT_XZ)
-            # print("len(segment_data_uncompressed) =,", len(segment_data_uncompressed))
-
-            # if segment_data == segment_data_uncompressed:
-            #     print("Compression correct")
-            #     segment_data = segment_data_compressed
-            # else:
-            #     print("Compression incorrect")
+            compressed_data = lzma.compress(data_to_be_compressed, format=lzma.FORMAT_XZ, filters=xz_compressor_filter, check=lzma.CHECK_CRC32)
 
             # TODO: zlib compression support (miniz)
-            # segment_data = zlib.compress(segment_data, 9)
+            # compressed_data = zlib.compress(data_to_be_compressed, 9)
 
-            print(f"Compressed data length for {segment.name} = ", len(segment_data))
-
-        if (segment.name == ".flash.appdesc" and self.compress_flash_rodata):
-            print(
-                f"Compressing data for {segment.name} of length = ", len(segment_data[256:])
-            )
-
-            with open(f"/tmp/uncompressed_{segment.name}.bin", "wb") as ff:
-                ff.write(segment_data[256:])
-
-            subprocess.run(
-                ["rm", f"/tmp/uncompressed_{segment.name}.bin.xz"], capture_output=True, text=True
-            )
-
-            command = [
-                "xz",
-                "--check=crc32",
-                "--lzma2=dict=64KiB",
-                "-k",
-                f"/tmp/uncompressed_{segment.name}.bin",
-            ]
-
-            # Execute the shell command
-            result = subprocess.run(command, capture_output=True, text=True)
-
-            if result.returncode == 0:
-                print(f"File compressed successfully: /tmp/uncompressed_{segment.name}.bin.xz")
+            if (segment.name == ".flash.appdesc"):
+                segment_data = segment_data[:256] + compressed_data
             else:
-                print(f"Error compressing file: {result.stderr}")
-
-            with open(f"/tmp/uncompressed_{segment.name}.bin.xz", "rb") as ff:
-                ro_data = ff.read()
-
-            segment_data = segment_data[0:256] + ro_data
+                segment_data = compressed_data
 
             print(f"Compressed data length for {segment.name} = ", len(segment_data))
-
 
         f.write(struct.pack("<II", segment.addr, len(segment_data)))
         f.write(segment_data)
